@@ -1,0 +1,55 @@
+name: RACQ Daily Status Report
+
+on:
+  schedule:
+    # Runs daily at 8:00 AM AEST (10:00 PM UTC previous day)
+    - cron: '0 22 * * 0-4'  # Sun-Thu UTC = Mon-Fri AEST
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Custom prompt for the Copilot agent (optional)'
+        required: false
+        default: ''
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create daily report issue for Copilot
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            const customPrompt = context.payload.inputs?.prompt || '';
+
+            const body = customPrompt || `
+            ## Daily RACQ Status Report - ${today}
+
+            Please use the **/racq-status-report** skill to generate today's report.
+
+            ### Instructions:
+            1. Read the RACQ_Support_Tickets.xlsx file from SharePoint
+            2. Find the latest daily status report email from shgulat@microsoft.com
+            3. Look up team chat context for each IcM
+            4. Categorize all 11 high/critical IcMs into priority buckets:
+               - 🔴 P1: No Workaround / Go-Live Blockers
+               - 🟡 P2: Workaround Exists but Insufficient / ETA Pending
+               - 🟢 P3: Closed / Resolved / Not a Bug
+            5. Include age (days since creation) for each IcM
+            6. Email the report to jinalmakwana@microsoft.com (CC: Toby.James@microsoft.com)
+               Subject: "RACQ Daily Status Report - ${today}"
+            `;
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `RACQ Daily Status Report - ${today}`,
+              body: body,
+              labels: ['copilot', 'daily-report'],
+              assignees: ['copilot']
+            });
+
+            console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);

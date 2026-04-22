@@ -1,0 +1,4 @@
+steps:
+  - run: |
+      echo "RACQ Daily Status Report - Copilot Cloud Agent Environment"
+      echo "Skills and M365 integration are handled by the agent."
