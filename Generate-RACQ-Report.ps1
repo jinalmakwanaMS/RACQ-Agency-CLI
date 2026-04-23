@@ -8,19 +8,67 @@ $ProgressPreference = "SilentlyContinue"
 # ── CONFIG ──────────────────────────────────────────────────────────────
 $ReportDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AzCliPath = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+$ExcelPath = Join-Path $ReportDir "RACQ_Support_Tickets.xlsx"
 $CachePath = Join-Path $ReportDir "racq-icm-cache.json"
 $To = "jinalmakwana@microsoft.com"
 $Cc = "Toby.James@microsoft.com"
 $Scope = "api://icmmcpapi-prod/mcp.tools"
 $Endpoint = "https://icm-mcp-prod.azure-api.net/v1/"
 
-# Load cached Excel data
-if (Test-Path $CachePath) {
+# ── LOAD EXCEL DATA ────────────────────────────────────────────────────
+# Priority: Live Excel (synced by Power Automate) > JSON cache fallback
+$cache = $null
+
+if (Test-Path $ExcelPath) {
+    Write-Host "Reading live Excel file: $ExcelPath"
+    Write-Host "  Last modified: $((Get-Item $ExcelPath).LastWriteTime)"
+    Import-Module ImportExcel -ErrorAction Stop
+
+    $rows = Import-Excel $ExcelPath -WorksheetName "Support tickets" -ErrorAction Stop
+    $highCrit = $rows | Where-Object {
+        $_."Updated Severity" -in @("High", "Critical") -or
+        $_."Old Severity" -in @("High", "Critical")
+    }
+
+    # Build cache object from live Excel
+    $cacheIncidents = @{}
+    foreach ($row in $highCrit) {
+        $icmId = "$($row.'IcM #')".Trim()
+        if (-not $icmId -or $icmId -eq "") { continue }
+
+        $sev = if ($row."Updated Severity") { $row."Updated Severity" } else { $row."Old Severity" }
+        $cacheIncidents[$icmId] = @{
+            sr          = "$($row.'SR #')".Trim()
+            severity    = $sev
+            title       = "$($row.'Description')".Trim()
+            excelStatus = "$($row.'Status')".Trim()
+            eta         = "$($row.'ETA')".Trim()
+            workaround  = if ($row.'Workaround') { "$($row.'Workaround')".Trim() } else { "" }
+            nextSteps   = if ($row.'Next Steps') { "$($row.'Next Steps')".Trim() } else { "" }
+            comments    = if ($row.'Comments') { "$($row.'Comments')".Trim() } else { "" }
+            notes       = ""
+        }
+    }
+
+    # Build cache structure
+    $cache = [PSCustomObject]@{
+        lastUpdated    = (Get-Date).ToString("o")
+        source         = "RACQ_Support_Tickets.xlsx (live)"
+        incidents      = [PSCustomObject]$cacheIncidents
+        childIncidents = [PSCustomObject]@{}
+    }
+
+    # Auto-save as JSON cache for reference
+    $cache | ConvertTo-Json -Depth 5 | Set-Content $CachePath -Encoding UTF8
+    Write-Host "  [OK] Loaded $($cacheIncidents.Count) High/Critical items from Excel"
+
+} elseif (Test-Path $CachePath) {
+    Write-Host "No Excel file found. Using JSON cache: $CachePath"
     $cache = Get-Content $CachePath -Raw | ConvertFrom-Json
-    Write-Host "Loaded Excel cache from: $($cache.lastUpdated)"
+    Write-Host "  Cache from: $($cache.lastUpdated)"
+
 } else {
-    Write-Host "WARNING: No Excel cache found at $CachePath. Run 'refresh excel cache' in Copilot CLI." -ForegroundColor Yellow
-    $cache = $null
+    throw "No data source available. Place RACQ_Support_Tickets.xlsx in $ReportDir or ensure racq-icm-cache.json exists."
 }
 
 # ── FUNCTIONS ───────────────────────────────────────────────────────────
