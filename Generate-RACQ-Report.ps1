@@ -8,29 +8,19 @@ $ProgressPreference = "SilentlyContinue"
 # ── CONFIG ──────────────────────────────────────────────────────────────
 $ReportDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AzCliPath = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+$CachePath = Join-Path $ReportDir "racq-icm-cache.json"
 $To = "jinalmakwana@microsoft.com"
 $Cc = "Toby.James@microsoft.com"
 $Scope = "api://icmmcpapi-prod/mcp.tools"
 $Endpoint = "https://icm-mcp-prod.azure-api.net/v1/"
 
-# IcM mapping: IcM ID -> [Severity, SR#, Short Title]
-$IcmMap = [ordered]@{
-    21000000890308 = @("High",     "2601270030006343", "IVR Welcome Message Stutters in Audio Playback")
-    51000000978035 = @("High",     "2604070030006100", "Missing Conversation Summary with custom Omnichannel Agent role")
-    51000000910153 = @("High",     "2602130030002880", "Custom column data not visible after conversation transfer")
-    21000000968169 = @("High",     "2603270030005523", "Script Errors - LiveWorkItemId session context error on Voice conversations")
-    51000000902213 = @("High",     "2602120030007445", "Active conversation form disappears on navigation")
-    51000000958196 = @("High",     "2603120030002536", "Automated Messages not working for Voice Channels")
-    21000000863530 = @("High",     "2601130030007340", "Inconsistent Call and Chat Notifications for Agents")
-    51000000899493 = @("High",     "2601300030001832", "Automated Messages EN-AU - only one record exists")
-    21000000930073 = @("Critical", "2603040030006553", "Solution import failure - ISV code reduced open transaction count")
-    21000000895436 = @("Critical", "2601150030006239", "Copilot Studio Agent Publish Fails (IdentifierNotRecognized)")
-}
-
-# Child IcM for 51000000910153 (OOB Save button issue)
-$ChildIcm = @{
-    Id    = 51000000969890
-    Title = "OOB Save button saves zero data"
+# Load cached Excel data
+if (Test-Path $CachePath) {
+    $cache = Get-Content $CachePath -Raw | ConvertFrom-Json
+    Write-Host "Loaded Excel cache from: $($cache.lastUpdated)"
+} else {
+    Write-Host "WARNING: No Excel cache found at $CachePath. Run 'refresh excel cache' in Copilot CLI." -ForegroundColor Yellow
+    $cache = $null
 }
 
 # ── FUNCTIONS ───────────────────────────────────────────────────────────
@@ -75,10 +65,24 @@ Write-Host "Authenticating with Azure..."
 $token = Get-AzToken
 Write-Host "  [OK] Token acquired"
 
-# 2. Query all IcMs
-Write-Host "Querying IcM portal for live data..."
+# 2. Build IcM list from cache
+$icmIds = @()
+$childIcmIds = @()
+if ($cache) {
+    foreach ($prop in $cache.incidents.PSObject.Properties) {
+        $icmIds += $prop.Name
+    }
+    foreach ($prop in $cache.childIncidents.PSObject.Properties) {
+        $childIcmIds += $prop.Name
+    }
+} else {
+    throw "No cache file found. Cannot proceed without IcM registry."
+}
+
+# 3. Query all IcMs from IcM MCP API
+Write-Host "Querying IcM portal for live data ($($icmIds.Count) incidents + $($childIcmIds.Count) child)..."
 $incidents = @{}
-foreach ($icmId in $IcmMap.Keys) {
+foreach ($icmId in $icmIds) {
     Write-Host "  Querying IcM $icmId..."
     try {
         $raw = Call-IcmTool $token "get_incident_details_by_id" @{ incidentId = [long]$icmId }
@@ -94,84 +98,105 @@ foreach ($icmId in $IcmMap.Keys) {
         Write-Host "    [OK] $($data.state) | Age: $($incidents[$icmId].Age) days"
     } catch {
         Write-Host "    [FAIL] Failed: $_" -ForegroundColor Red
-        $incidents[$icmId] = @{ State = "UNKNOWN"; Age = "?"; Owner = "?"; Title = $IcmMap[$icmId][2] }
+        $cachedItem = $cache.incidents.$icmId
+        $incidents[$icmId] = @{ State = "UNKNOWN"; Age = "?"; Owner = "?"; Title = if ($cachedItem) { $cachedItem.title } else { "Unknown" } }
     }
 }
 
-# Also query child IcM
-Write-Host "  Querying child IcM $($ChildIcm.Id)..."
-try {
-    $childRaw = Call-IcmTool $token "get_incident_details_by_id" @{ incidentId = [long]$ChildIcm.Id }
-    $childData = $childRaw | ConvertFrom-Json
-    $ChildIcm.State = $childData.state
-    $ChildIcm.Age = Get-AgeDays $childData.createdDate
-    Write-Host "    [OK] $($childData.state) | Age: $($ChildIcm.Age) days"
-} catch {
-    $ChildIcm.State = "UNKNOWN"
-    $ChildIcm.Age = "?"
+# Also query child IcMs
+$childIncidents = @{}
+foreach ($childId in $childIcmIds) {
+    Write-Host "  Querying child IcM $childId..."
+    try {
+        $childRaw = Call-IcmTool $token "get_incident_details_by_id" @{ incidentId = [long]$childId }
+        $childData = $childRaw | ConvertFrom-Json
+        $childIncidents[$childId] = @{
+            State = $childData.state
+            Age   = Get-AgeDays $childData.createdDate
+        }
+        Write-Host "    [OK] $($childData.state) | Age: $($childIncidents[$childId].Age) days"
+    } catch {
+        $childIncidents[$childId] = @{ State = "UNKNOWN"; Age = "?" }
+        Write-Host "    [FAIL] Failed: $_" -ForegroundColor Red
+    }
 }
 
-# 3. Categorize into priority buckets
+# 4. Categorize into priority buckets using live IcM state + cached Excel data
 # P1: No workaround / Go-live blockers / Workaround not working
 # P2: Workaround exists but insufficient / Has ETA
 # P3: Resolved / Closed
 
 $P1 = @(); $P2 = @(); $P3 = @()
 
-foreach ($icmId in $IcmMap.Keys) {
+foreach ($icmId in $icmIds) {
     $inc = $incidents[$icmId]
-    $sev = $IcmMap[$icmId][0]
-    $sr  = $IcmMap[$icmId][1]
-    $title = $IcmMap[$icmId][2]
+    $cached = $cache.incidents.$icmId
 
     $entry = @{
-        IcmId = $icmId; Sev = $sev; SR = $sr; Title = $title
-        State = $inc.State; Age = $inc.Age; Owner = $inc.Owner
+        IcmId = $icmId
+        Sev   = $cached.severity
+        SR    = $cached.sr
+        Title = $cached.title
+        State = $inc.State
+        Age   = $inc.Age
+        Owner = $inc.Owner
     }
 
-    if ($inc.State -in @("RESOLVED", "CLOSED")) {
+    # P3: Resolved/Closed (from live IcM state OR Excel status)
+    if ($inc.State -in @("RESOLVED", "CLOSED") -or $cached.excelStatus -eq "Closed") {
+        $entry.Status = $cached.nextSteps
         $P3 += $entry
+        continue
     }
-    elseif ($icmId -eq 21000000890308) {
-        $entry.Status = 'Root cause confirmed - 2 IVR bot instances joining same call. Transferred to Skype MediaPaaS / Champs team. **No workaround. No ETA.**'
+
+    # Build status from Excel cache data
+    $statusParts = @()
+    if ($cached.nextSteps) { $statusParts += $cached.nextSteps }
+    if ($cached.notes -and $cached.notes -ne "Resolved.") { $statusParts += $cached.notes }
+
+    $hasWorkaround = ($cached.workaround -and $cached.workaround -ne "None")
+    $workaroundFailed = ($cached.workaround -match "NOT working|not working|failed|zero data|unsustainable")
+    $hasEta = ($cached.eta -and $cached.eta -ne "Not specified")
+
+    # Check for child IcM info
+    if ($cached.childIcm) {
+        $childId = $cached.childIcm
+        $childInc = $childIncidents[$childId]
+        $childCached = $cache.childIncidents.$childId
+        if ($childInc) {
+            $childLink = "https://portal.microsofticm.com/imp/v5/incidents/details/$childId"
+            $statusParts += "Child IcM [$childId]($childLink) ($($childInc.State), $($childInc.Age) days): $($childCached.title)"
+        }
+    }
+
+    # Determine priority bucket
+    # P1: No workaround, or workaround failed/not working
+    if (-not $hasWorkaround -or $workaroundFailed) {
+        $woText = if ($workaroundFailed) { "**Workaround not working.**" } else { "**No workaround.**" }
+        $etaText = if ($hasEta) { "ETA: $($cached.eta)" } else { "**No ETA.**" }
+        $entry.Status = ($statusParts -join " ") + " $woText $etaText"
         $P1 += $entry
     }
-    elseif ($icmId -eq 51000000978035) {
-        $entry.Status = 'Copilot Summary init failures and org setting read errors with custom agent role. **No workaround. No ETA.**'
-        $P1 += $entry
-    }
-    elseif ($icmId -eq 21000000968169) {
-        $entry.Status = 'Opening any voice conversation throws LiveWorkItemId error; conversation does not load. PG validating script fix. **No workaround. Pending PG confirmation.**'
-        $P1 += $entry
-    }
-    elseif ($icmId -eq 51000000910153) {
-        $childLink = "https://portal.microsofticm.com/imp/v5/incidents/details/$($ChildIcm.Id)"
-        $entry.Status = "OOB Save button not working - child IcM [$($ChildIcm.Id)]($childLink) ($($ChildIcm.State), $($ChildIcm.Age) days) confirms save writes zero data. **No effective workaround.**"
-        $P1 += $entry
-    }
-    elseif ($icmId -eq 51000000902213) {
-        $entry.Status = 'Temp workaround: avoid form dropdown. Permanent fix **ETA 15 May**.'
-        $P2 += $entry
-    }
-    elseif ($icmId -eq 51000000958196) {
-        $entry.Status = 'Stale Dataverse record root cause. Manual Dataverse cleanup workaround in place but operationally heavy. **ETA pending PG prioritization.**'
-        $P2 += $entry
-    }
+    # P2: Has workaround (working) or has ETA
     else {
-        $entry.Status = "Status from IcM: $($inc.State)"
+        $woText = "Workaround: $($cached.workaround)."
+        $etaText = if ($hasEta) { "**ETA: $($cached.eta).**" } else { "**ETA pending.**" }
+        $entry.Status = ($statusParts -join " ") + " $woText $etaText"
         $P2 += $entry
     }
 }
 
-# 4. Build Key Asks (exclude items with workaround + ETA)
+# 5. Build Key Asks (exclude items with working workaround + confirmed ETA)
 $keyAsks = @()
 foreach ($item in $P1) {
     $keyAsks += $item
 }
-# From P2, only include items WITHOUT (workaround + ETA)
 foreach ($item in $P2) {
-    # 51000000902213 has workaround + ETA - exclude
-    if ($item.IcmId -ne 51000000902213) {
+    $cachedItem = $cache.incidents.($item.IcmId)
+    $hasWorkingWorkaround = ($cachedItem.workaround -and $cachedItem.workaround -ne "None" -and $cachedItem.workaround -notmatch "NOT working|not working|failed|unsustainable")
+    $hasConfirmedEta = ($cachedItem.eta -and $cachedItem.eta -ne "Not specified")
+    # Exclude from Key Asks only if BOTH workaround is working AND ETA is confirmed
+    if (-not ($hasWorkingWorkaround -and $hasConfirmedEta)) {
         $keyAsks += $item
     }
 }

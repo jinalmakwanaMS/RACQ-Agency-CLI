@@ -1,0 +1,115 @@
+{
+  "lastUpdated": "2026-04-23T11:45:00+10:00",
+  "source": "RACQ_Support_Tickets.xlsx (shgulat OneDrive)",
+  "incidents": {
+    "21000000890308": {
+      "sr": "2601270030006343",
+      "severity": "High",
+      "title": "IVR Welcome Message Stutters in Audio Playback",
+      "excelStatus": "Bug",
+      "eta": "31-Mar-2026 (missed)",
+      "workaround": "None",
+      "nextSteps": "PG investigating; issue escalated internally. PR created; ETA end of March. PG analyzing Media Paas API logs; pending PG response.",
+      "notes": "Root cause: 2 IVR bot instances joining same call. Transferred to Skype MediaPaaS / Champs team."
+    },
+    "51000000978035": {
+      "sr": "2604070030006100",
+      "severity": "High",
+      "title": "Missing Conversation Summary with custom Omnichannel Agent role",
+      "excelStatus": "PG Troubleshooting",
+      "eta": "Not specified",
+      "workaround": "None",
+      "nextSteps": "PG investigating issue related to custom role privileges. Dev validating suggested changes in ST and MAXIT environments. Pending PG response.",
+      "notes": "Copilot Summary init failures and org setting read errors with custom agent role."
+    },
+    "51000000910153": {
+      "sr": "2602130030002880",
+      "severity": "High",
+      "title": "Custom column data not visible after conversation transfer",
+      "excelStatus": "Cx review",
+      "eta": "Not specified",
+      "workaround": "OOB button suggested by PG but NOT working (child IcM 51000000969890 confirms save writes zero data)",
+      "nextSteps": "PG indicated issue due to customizations. Suggested use of OOB button. Related new IcM (51000000969890) raised and pending PG.",
+      "notes": "Workaround failed - moved to P1. Child IcM 51000000969890 actively being investigated.",
+      "childIcm": "51000000969890"
+    },
+    "21000000968169": {
+      "sr": "2603270030005523",
+      "severity": "High",
+      "title": "Script Errors - LiveWorkItemId session context error on Voice conversations",
+      "excelStatus": "PG Troubleshooting",
+      "eta": "Not specified",
+      "workaround": "None",
+      "nextSteps": "PG actively investigating script-related issue. HAR file and form scripts shared with PG. Pending PG response.",
+      "notes": "Opening any voice conversation throws LiveWorkItemId error; conversation does not load."
+    },
+    "51000000902213": {
+      "sr": "2602120030007445",
+      "severity": "High",
+      "title": "Active conversation form disappears on navigation",
+      "excelStatus": "PG Troubleshooting",
+      "eta": "15-May-2026 (updated from 31-Mar, then 10-Apr)",
+      "workaround": "Avoid form dropdown navigation",
+      "nextSteps": "PG confirmed behavior by design; repair item created. ETA for OCE discussed (15-May mentioned). DEV and PG reviewing deployment timing.",
+      "notes": "Has workaround + ETA. P2 item."
+    },
+    "51000000958196": {
+      "sr": "2603120030002536",
+      "severity": "High",
+      "title": "Automated Messages not working for Voice Channels",
+      "excelStatus": "Cx review",
+      "eta": "Not specified",
+      "workaround": "Manual Dataverse cleanup (operationally unsustainable)",
+      "nextSteps": "PG confirmed known limitation and shared workaround. Workaround could not be implemented in some envs. Bug created; ETA under discussion.",
+      "notes": "Stale Dataverse record root cause. Workaround operationally heavy."
+    },
+    "21000000863530": {
+      "sr": "2601130030007340",
+      "severity": "High",
+      "title": "Inconsistent Call and Chat Notifications for Agents",
+      "excelStatus": "Closed",
+      "eta": "03-Apr-2026",
+      "workaround": "PG changed setting as workaround",
+      "nextSteps": "Case closed after DEV confirmation.",
+      "notes": "Resolved."
+    },
+    "51000000899493": {
+      "sr": "2601300030001832",
+      "severity": "High",
+      "title": "Automated Messages EN-AU - only one record exists",
+      "excelStatus": "Closed",
+      "eta": "25-Mar-2026",
+      "workaround": "Available; DEV continued with workaround",
+      "nextSteps": "PG deployed fix for EN-AU automated messages. Closed after FC and DEV confirmation.",
+      "notes": "Resolved."
+    },
+    "21000000930073": {
+      "sr": "2603040030006553",
+      "severity": "Critical",
+      "title": "Solution import failure - ISV code reduced open transaction count",
+      "excelStatus": "Closed",
+      "eta": "05-Mar-2026",
+      "workaround": "PG provided workaround script",
+      "nextSteps": "Solution import succeeded after cleanup. Issue fixed and monitored before closure.",
+      "notes": "Resolved."
+    },
+    "21000000895436": {
+      "sr": "2601150030006239",
+      "severity": "Critical",
+      "title": "Copilot Studio Agent Publish Fails (IdentifierNotRecognized)",
+      "excelStatus": "Closed",
+      "eta": "Not specified",
+      "workaround": "Deployment working after workaround",
+      "nextSteps": "PG engaged; closed after confirmation issue no longer reproducible.",
+      "notes": "Resolved."
+    }
+  },
+  "childIncidents": {
+    "51000000969890": {
+      "parentIcm": "51000000910153",
+      "sr": "2604010030006441",
+      "title": "OOB Save button in active conversation form saves zero data",
+      "notes": "Confirms parent workaround is not working"
+    }
+  }
+}
