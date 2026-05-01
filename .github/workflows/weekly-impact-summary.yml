@@ -1,0 +1,55 @@
+name: Weekly Impact Summary
+
+on:
+  schedule:
+    # Runs every Saturday at 9:00 AM AEST (11:00 PM Friday UTC)
+    - cron: '0 23 * * 5'  # Friday UTC = Saturday AEST
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Custom prompt for the Copilot agent (optional)'
+        required: false
+        default: ''
+
+jobs:
+  generate-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create weekly impact issue for Copilot
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            const customPrompt = context.payload.inputs?.prompt || '';
+
+            const body = customPrompt || `
+            ## Weekly Impact Summary - ${today}
+
+            Please use the **weekly-impact-summary** skill to generate this week's summary.
+
+            ### Instructions:
+            1. Search sent emails from the past week (Monday–Friday)
+            2. Search Teams messages sent this week
+            3. Review calendar events for key meetings and customer interactions
+            4. Focus only on work where I was directly involved with significant contribution
+            5. Generate a concise impact summary (max 200 words, 3-5 items)
+            6. Include a Connect One-Liner
+            7. Save to: Career Progression/Weekly Impact Summaries/${today}-weekly-impact.md
+            8. SEND (not draft) the summary email to jinalmakwana@microsoft.com
+               Subject: "Weekly Impact Summary — ${today}"
+               Use SendEmailWithAttachments tool to send immediately.
+            `;
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Weekly Impact Summary - ${today}`,
+              body: body,
+              labels: ['copilot', 'weekly-summary'],
+              assignees: ['copilot']
+            });
+
+            console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
